@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+mod gammaray_open_app;
+
 use std::default::Default;
 use tao::event::{ElementState, Event, KeyEvent, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
@@ -22,6 +24,13 @@ struct State<'a> {
     render_pipeline: wgpu::RenderPipeline,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}
+
 pub fn showGPU() {
 
     let instances = Instance::new(wgpu::InstanceDescriptor {
@@ -36,7 +45,7 @@ pub fn showGPU() {
     }
 }
 
-pub async fn run(){
+pub async fn run() {
 
     env_logger::init();
 
@@ -204,7 +213,7 @@ impl<'a> State<'a> {
         false
     }
 
-    fn update(&mut self){
+    fn update(&mut self) {
 
     }
 
