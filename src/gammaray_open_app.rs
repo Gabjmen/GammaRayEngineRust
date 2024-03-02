@@ -4,7 +4,7 @@ use eframe::{egui, NativeOptions, run_native};
 
 pub fn open_project_window() {
     let native_options = NativeOptions::default();
-    run_native("GammaRayEngine", native_options, Box::new(|cc| Box::new(MyEguiApp::new(cc))));
+    let _ = run_native("GammaRayEngine", native_options, Box::new(|cc| Box::new(MyEguiApp::new(cc))));
 }
 
 #[derive(Default)]
