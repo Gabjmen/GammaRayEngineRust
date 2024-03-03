@@ -10,7 +10,7 @@ use std::mem;
 use tao::event::{ElementState, Event, KeyEvent, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::{Window, WindowBuilder};
-use wgpu::{Backends, Instance};
+use wgpu::{Backend, Backends, Instance};
 use std::sync::Arc;
 use image::GenericImageView;
 use tao::event::WindowEvent::KeyboardInput;
@@ -40,6 +40,7 @@ struct State<'a> {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    last_frame: Option<std::time::Instant>,
 }
 
 #[repr(C)]
@@ -163,6 +164,7 @@ impl<'a> State<'a> {
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGpu
         let instance = Instance::new(wgpu::InstanceDescriptor{
+            backends: Backends::VULKAN | Backends::METAL,
             ..Default::default()
         });
 
@@ -360,6 +362,8 @@ impl<'a> State<'a> {
 
         let num_indices = INDICES.len() as u32;
 
+        let last_frame = Some(std::time::Instant::now());
+
         Self {
             surface,
             device,
@@ -378,6 +382,7 @@ impl<'a> State<'a> {
             camera_controller,
             camera_uniform,
             camera_buffer,
+            last_frame,
         }
     }
 
@@ -443,6 +448,11 @@ impl<'a> State<'a> {
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
+
+        let elapsed_seconds = self.last_frame.unwrap().elapsed().as_secs_f64();
+        let fps = 1. / elapsed_seconds;
+        println!("FPS: {:.0}", fps);
+        self.last_frame = Some(std::time::Instant::now());
 
         return Ok(());
     }
