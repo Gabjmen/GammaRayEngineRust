@@ -2,22 +2,26 @@
 
 mod gammaray_open_app;
 mod texture;
-mod gammaray_camera;
-mod gammaray_camera_controller;
+mod camera;
+mod camera_controller;
+mod instance;
 
+use std::vec::Vec;
 use std::default::Default;
 use std::mem;
 use tao::event::{ElementState, Event, KeyEvent, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::{Window, WindowBuilder};
-use wgpu::{Backend, Backends, Instance};
+use wgpu::{Backends, Instance};
 use std::sync::Arc;
 use image::GenericImageView;
 use tao::event::WindowEvent::KeyboardInput;
-use tao::keyboard::Key;
+use tao::keyboard::{Key, KeyCode};
 use wgpu::util::DeviceExt;
-use gammaray_camera::{Camera, CameraUniform};
-use gammaray_camera_controller::CameraController;
+use camera::{Camera, CameraUniform};
+use camera_controller::CameraController;
+use cgmath::prelude::*;
+use cgmath::{Deg, Quaternion, Vector3};
 
 struct State<'a> {
     surface: wgpu::Surface<'a>,
@@ -41,6 +45,8 @@ struct State<'a> {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     last_frame: Option<std::time::Instant>,
+    instances: Vec<instance::Instance>,
+    instance_buffer: wgpu::Buffer,
 }
 
 #[repr(C)]
@@ -122,7 +128,7 @@ pub async fn run() {
                     | KeyboardInput {
                         event: KeyEvent{
                             state: ElementState::Pressed,
-                            logical_key: Key::Escape,
+                            physical_key: KeyCode::Escape,
                             ..
                         }, ..
                     } => *control_flow = ControlFlow::Exit,
@@ -159,12 +165,15 @@ pub async fn run() {
 
 impl<'a> State<'a> {
     async fn new(window: Arc<Window>) -> Self {
+        const NUM_INSTANCES_PER_ROW:u32 = 10;
+        const INSTANCE_DISPLACEMENT: Vector3<f32> = Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
+
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGpu
         let instance = Instance::new(wgpu::InstanceDescriptor{
-            backends: Backends::VULKAN | Backends::METAL,
+            backends: Backends::DX12 | Backends::METAL,
             ..Default::default()
         });
 
@@ -261,14 +270,14 @@ impl<'a> State<'a> {
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
-            up: cgmath::Vector3::unit_y(),
+            up: Vector3::unit_y(),
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
             znear: 0.1,
             zfar: 100.0,
         };
 
-        let mut camera_uniform = gammaray_camera::CameraUniform::new();
+        let mut camera_uniform = camera::CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
 
         let camera_buffer = device.create_buffer_init(
@@ -327,6 +336,7 @@ impl<'a> State<'a> {
                 entry_point: "vs_main",
                 buffers: &[
                     Vertex::desc(),
+                    instance::InstanceRaw::desc(),
                 ],
             },
             fragment: Some(wgpu::FragmentState{
@@ -364,6 +374,33 @@ impl<'a> State<'a> {
 
         let last_frame = Some(std::time::Instant::now());
 
+        let instances = (0..NUM_INSTANCES_PER_ROW).flat_map(|z| {
+            (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                let position = Vector3 {x: x as f32, y: 0.0, z: z as f32} - INSTANCE_DISPLACEMENT;
+
+                let rotation = if position.is_zero() {
+                    // this is needed so an object at (0, 0, 0) won't get scaled to zero
+                    // as Quaternions can affect scale if they're not created correctly
+                    Quaternion::from_axis_angle(Vector3::unit_z(), Deg(0.0))
+                }
+                else {
+                    Quaternion::from_axis_angle(position.normalize(), Deg(45.0))
+                };
+                instance::Instance {
+                    position, rotation,
+                }
+            })
+        }).collect::<Vec<_>>();
+        
+        let instance_data = instances.iter().map(instance::Instance::to_raw).collect::<Vec<_>>();
+        let instance_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&instance_data),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
+
         Self {
             surface,
             device,
@@ -383,6 +420,8 @@ impl<'a> State<'a> {
             camera_uniform,
             camera_buffer,
             last_frame,
+            instances,
+            instance_buffer,
         }
     }
 
@@ -440,8 +479,9 @@ impl<'a> State<'a> {
         render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+        render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
 
         drop(render_pass);
 
