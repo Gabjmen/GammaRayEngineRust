@@ -1,6 +1,6 @@
+use crate::texture;
 use std::ops::Range;
 use wgpu::{BindGroup, VertexBufferLayout};
-use crate::texture;
 
 pub trait Vertex {
     fn desc() -> VertexBufferLayout<'static>;
@@ -47,8 +47,8 @@ impl Vertex for ModelVertex {
                     offset: mem::size_of::<[f32; 11]>() as wgpu::BufferAddress,
                     shader_location: 4,
                     format: wgpu::VertexFormat::Float32x3,
-                }
-            ]
+                },
+            ],
         }
     }
 }
@@ -156,8 +156,8 @@ pub trait DrawModel<'a> {
 }
 
 impl<'a, 'b> DrawModel<'b> for wgpu::RenderPass<'a>
-    where
-        'b: 'a,
+where
+    'b: 'a,
 {
     fn draw_mesh(
         &mut self,
@@ -189,7 +189,7 @@ impl<'a, 'b> DrawModel<'b> for wgpu::RenderPass<'a>
         &mut self,
         model: &'b Model,
         camera_bind_group: &'b BindGroup,
-        light_bind_group: &'b BindGroup
+        light_bind_group: &'b BindGroup,
     ) {
         self.draw_model_instanced(model, 0..1, camera_bind_group, light_bind_group);
     }
@@ -199,11 +199,17 @@ impl<'a, 'b> DrawModel<'b> for wgpu::RenderPass<'a>
         model: &'b Model,
         instances: Range<u32>,
         camera_bind_group: &'b BindGroup,
-        light_bind_group: &'b BindGroup
+        light_bind_group: &'b BindGroup,
     ) {
         for mesh in &model.meshes {
             let material = &model.materials[mesh.material];
-            self.draw_mesh_instanced(mesh, material, instances.clone(), camera_bind_group, light_bind_group);
+            self.draw_mesh_instanced(
+                mesh,
+                material,
+                instances.clone(),
+                camera_bind_group,
+                light_bind_group,
+            );
         }
     }
 
@@ -216,7 +222,13 @@ impl<'a, 'b> DrawModel<'b> for wgpu::RenderPass<'a>
         light_bind_group: &'b wgpu::BindGroup,
     ) {
         for mesh in &model.meshes {
-            self.draw_mesh_instanced(mesh, material, instances.clone(), camera_bind_group, light_bind_group);
+            self.draw_mesh_instanced(
+                mesh,
+                material,
+                instances.clone(),
+                camera_bind_group,
+                light_bind_group,
+            );
         }
     }
 }
@@ -252,8 +264,8 @@ pub trait DrawLight<'a> {
 }
 
 impl<'a, 'b> DrawLight<'b> for wgpu::RenderPass<'a>
-    where
-        'b: 'a,
+where
+    'b: 'a,
 {
     fn draw_light_mesh(
         &mut self,
@@ -294,7 +306,12 @@ impl<'a, 'b> DrawLight<'b> for wgpu::RenderPass<'a>
         light_bind_group: &'b wgpu::BindGroup,
     ) {
         for mesh in &model.meshes {
-            self.draw_light_mesh_instanced(mesh, instances.clone(), camera_bind_group, light_bind_group);
+            self.draw_light_mesh_instanced(
+                mesh,
+                instances.clone(),
+                camera_bind_group,
+                light_bind_group,
+            );
         }
     }
 }

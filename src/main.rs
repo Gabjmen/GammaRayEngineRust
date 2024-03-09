@@ -2,7 +2,7 @@
 
 mod gammaray_open_app;
 
-use GammaRayEngineRust::{showGPU, run};
+use GammaRayEngineRust::run;
 
 fn main() {
     //showGPU();

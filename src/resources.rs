@@ -1,8 +1,8 @@
 use std::io::{BufReader, Cursor};
 
 use cfg_if::cfg_if;
-use wgpu::{Device, Queue};
 use wgpu::util::DeviceExt;
+use wgpu::{Device, Queue};
 
 use crate::{model, texture};
 
@@ -61,7 +61,7 @@ pub async fn load_texture(
     file_name: &str,
     is_normal_map: bool,
     device: &Device,
-    queue: &Queue
+    queue: &Queue,
 ) -> anyhow::Result<texture::Texture> {
     let data = load_binary(file_name).await?;
     texture::Texture::from_bytes(device, queue, &data, file_name, is_normal_map)
@@ -91,11 +91,12 @@ pub async fn load_model(
             tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
         },
     )
-        .await?;
+    .await?;
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let diffuse_texture = load_texture(&m.diffuse_texture.unwrap(), false, device, queue).await?;
+        let diffuse_texture =
+            load_texture(&m.diffuse_texture.unwrap(), false, device, queue).await?;
         let normal_texture = load_texture(&m.normal_texture.unwrap(), true, device, queue).await?;
 
         materials.push(<model::Material>::new(
@@ -190,7 +191,7 @@ pub async fn load_model(
             // Average the tangents/bitangents
             for (i, n) in triangles_included.into_iter().enumerate() {
                 let denom = 1.0 / n as f32;
-                let mut v = &mut vertices[i];
+                let v = &mut vertices[i];
                 v.tangent = (cgmath::Vector3::from(v.tangent) * denom).into();
                 v.bitangent = (cgmath::Vector3::from(v.bitangent) * denom).into();
             }
