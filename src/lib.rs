@@ -7,6 +7,7 @@ mod camera_controller;
 mod instance;
 mod model;
 mod resources;
+mod utils;
 
 use std::vec::Vec;
 use std::default::Default;
@@ -50,8 +51,6 @@ struct State<'a> {
     // unsafe references to the window's surface.
     window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
-    diffuse_bind_group: wgpu::BindGroup,
-    diffuse_texture: texture::Texture,
     camera: Camera,
     camera_controller: CameraController,
     camera_uniform: CameraUniform,
@@ -67,21 +66,8 @@ struct State<'a> {
     light_bind_group: wgpu::BindGroup,
     light_bind_group_layout: wgpu::BindGroupLayout,
     light_render_pipeline: wgpu::RenderPipeline,
+    debug_material: model::Material,
 }
-
-const VERTICES: &[ModelVertex] = &[
-    ModelVertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.00759614], normal: [0.0, 0.0, 0.0], }, // A
-    ModelVertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], normal: [0.0, 0.0, 0.0], }, // B
-    ModelVertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], normal: [0.0, 0.0, 0.0], }, // C
-    ModelVertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], normal: [0.0, 0.0, 0.0], }, // D
-    ModelVertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], normal: [0.0, 0.0, 0.0], }, // E
-];
-
-const INDICES: &[u16] = &[
-    0, 1, 4,
-    1, 2, 4,
-    2, 3, 4,
-];
 
 pub fn showGPU() {
 
@@ -222,7 +208,7 @@ impl<'a> State<'a> {
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGpu
         let instance = Instance::new(wgpu::InstanceDescriptor{
-            backends: Backends::DX12 | Backends::METAL,
+            backends: utils::getBackendForSpecificOS(),
             ..Default::default()
         });
 
@@ -269,15 +255,15 @@ impl<'a> State<'a> {
         };
         surface.configure(&device, &config);
 
-        let diffuse_bytes = include_bytes!("../res/test_pic.png");
-
-        let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "test_pic.png").unwrap();
+        // let diffuse_bytes = include_bytes!("../res/test_pic.png");
+        //
+        // let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "test_pic.png").unwrap();
 
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
-                label: Some("texture_bind-group_layout"),
+                label: Some("texture_bind_group_layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry{
                         binding: 0,
@@ -296,26 +282,42 @@ impl<'a> State<'a> {
                         // corresponding Texture entry above.
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry{
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry{
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
                     }
                 ],
             });
 
-        let diffuse_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor{
-                label: Some("diffuse_bind_group"),
-                layout: &texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry{
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                    },
-                    wgpu::BindGroupEntry{
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                    }
-                ],
-            }
-        );
+        // let diffuse_bind_group = device.create_bind_group(
+        //     &wgpu::BindGroupDescriptor{
+        //         label: Some("diffuse_bind_group"),
+        //         layout: &texture_bind_group_layout,
+        //         entries: &[
+        //             wgpu::BindGroupEntry{
+        //                 binding: 0,
+        //                 resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+        //             },
+        //             wgpu::BindGroupEntry{
+        //                 binding: 1,
+        //                 resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+        //             }
+        //         ],
+        //     }
+        // );
 
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
@@ -497,6 +499,16 @@ impl<'a> State<'a> {
             )
         };
 
+        let debug_material = {
+            let diffuse_bytes = include_bytes!("../res/cobble-diffuse.png");
+            let normal_bytes = include_bytes!("../res/cobble-normal.png");
+
+            let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "res/alt-diffuse.png", false).unwrap();
+            let normal_texture = texture::Texture::from_bytes(&device, &queue, normal_bytes, "res/alt-normal.png", true).unwrap();
+
+            model::Material::new(&device, "alt-material", diffuse_texture, normal_texture, &texture_bind_group_layout)
+        };
+
         Self {
             surface,
             device,
@@ -504,8 +516,6 @@ impl<'a> State<'a> {
             config,
             size,
             render_pipeline,
-            diffuse_texture,
-            diffuse_bind_group,
             window,
             camera,
             camera_bind_group,
@@ -522,6 +532,8 @@ impl<'a> State<'a> {
             light_bind_group,
             light_bind_group_layout,
             light_render_pipeline,
+            #[allow(dead_code)]
+            debug_material,
         }
     }
 
@@ -600,12 +612,22 @@ impl<'a> State<'a> {
         );
 
         render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.draw_model_instanced(
-            &self.obj_model,
-            0..self.instances.len() as u32,
-            &self.camera_bind_group,
-            &self.light_bind_group,
+        render_pass.draw_model_instanced_with_material(
+                &self.obj_model,
+                &self.debug_material,
+                0..self.instances.len() as u32,
+                &self.camera_bind_group,
+                &self.light_bind_group,
         );
+        // render_pass.draw_model_instanced(
+        //     &self.obj_model,
+        //     0..self.instances.len() as u32,
+        //     &self.camera_bind_group,
+        //     &self.light_bind_group,
+        // );
+
+
+
 
         use model::DrawModel;
         let mesh = &self.obj_model.meshes[0];
