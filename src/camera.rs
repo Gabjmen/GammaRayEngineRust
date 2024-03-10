@@ -1,16 +1,17 @@
-use crate::camera;
-use cgmath::{perspective, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, Vector3};
+use cgmath::*;
 use std::f32::consts::FRAC_PI_2;
 use std::time::Duration;
 use tao::dpi::PhysicalPosition;
 use tao::event::{ElementState, MouseScrollDelta};
 use tao::keyboard::KeyCode;
 
+const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
+
 #[derive(Debug)]
 pub struct Camera {
     pub position: Point3<f32>,
-    pub(crate) yaw: Rad<f32>,
-    pub(crate) pitch: Rad<f32>,
+    yaw: Rad<f32>,
+    pitch: Rad<f32>,
 }
 
 impl Camera {
@@ -38,37 +39,6 @@ impl Camera {
     }
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct CameraUniform {
-    view_position: [f32; 4],
-    view_proj: [[f32; 4]; 4],
-}
-
-impl CameraUniform {
-    pub fn new() -> Self {
-        Self {
-            view_position: [0.0; 4],
-            view_proj: cgmath::Matrix4::identity().into(),
-        }
-    }
-
-    pub fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
-        self.view_position = camera.position.to_homogeneous().into();
-        self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into()
-    }
-}
-
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.5,
-    0.0, 0.0, 0.0, 1.0,
-);
-
-const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
-
 pub struct Projection {
     aspect: f32,
     fovy: Rad<f32>,
@@ -91,10 +61,12 @@ impl Projection {
     }
 
     pub fn calc_matrix(&self) -> Matrix4<f32> {
-        OPENGL_TO_WGPU_MATRIX * perspective(self.fovy, self.aspect, self.znear, self.zfar)
+        // UDPATE
+        perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
 }
 
+#[derive(Debug)]
 pub struct CameraController {
     amount_left: f32,
     amount_right: f32,
@@ -167,10 +139,10 @@ impl CameraController {
     }
 
     pub fn process_scroll(&mut self, delta: &MouseScrollDelta) {
-        self.scroll = -match delta {
+        self.scroll = match delta {
             // I'm assuming a line is about 100 pixels
-            MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
-            MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
+            MouseScrollDelta::LineDelta(_, scroll) => -scroll * 0.5,
+            MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => -*scroll as f32,
             _ => 0.0,
         };
     }
@@ -205,15 +177,15 @@ impl CameraController {
 
         // If process_mouse isn't called every frame, these values
         // will not get set to zero, and the camera will rotate
-        // when moving in a non-cardinal direction.
+        // when moving in a non cardinal direction.
         self.rotate_horizontal = 0.0;
         self.rotate_vertical = 0.0;
 
         // Keep the camera's angle from going too high/low.
-        if camera.pitch < -Rad(FRAC_PI_2) {
-            camera.pitch = -Rad(FRAC_PI_2);
-        } else if camera.pitch > Rad(FRAC_PI_2) {
-            camera.pitch = Rad(FRAC_PI_2);
+        if camera.pitch < -Rad(SAFE_FRAC_PI_2) {
+            camera.pitch = -Rad(SAFE_FRAC_PI_2);
+        } else if camera.pitch > Rad(SAFE_FRAC_PI_2) {
+            camera.pitch = Rad(SAFE_FRAC_PI_2);
         }
     }
 }

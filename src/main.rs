@@ -2,6 +2,7 @@
 
 mod gammaray_open_app;
 
+use std::env;
 use GammaRayEngineRust::run;
 
 fn main() {
