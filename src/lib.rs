@@ -245,8 +245,6 @@ impl<'a> State<'a> {
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            // #[cfg(target_arch="wasm32")]
-            // backends: wgpu::Backends::BROWSER_WEBGPU,
             #[cfg(target_os = "windows")]
             backends: Backends::DX12,
             #[cfg(target_os = "linux")]
@@ -257,6 +255,8 @@ impl<'a> State<'a> {
             backends: Backends::VULKAN,
             #[cfg(target_os = "ios")]
             backends: Backends::METAL,
+            #[cfg(target_arch="wasm32")]
+            backends: wgpu::Backends::BROWSER_WEBGPU,
             ..Default::default()
         });
 
