@@ -1,4 +1,3 @@
-use crate::renderer;
 use bevy::{
     prelude::*,
     render::{

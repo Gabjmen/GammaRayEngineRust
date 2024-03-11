@@ -1,5 +1,3 @@
-#[cfg(feature = "debug")]
-use crate::debug;
 use crate::model::{DrawLight, DrawModel, Vertex};
 use crate::{camera, hdr, model, resources, texture};
 use cgmath::prelude::*;
@@ -10,12 +8,14 @@ use tao::event::{DeviceEvent, ElementState, Event, KeyEvent, MouseButton, Window
 use tao::event_loop::{ControlFlow, EventLoop};
 use tao::keyboard::KeyCode;
 use tao::window::Window;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
 use wgpu::Backends;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+#[cfg(feature = "debug")]
+use crate::debug;
 
-const NUM_INSTANCES_PER_ROW: u32 = 1;
+const NUM_INSTANCES_PER_ROW: u32 = 10;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -177,7 +177,7 @@ pub(crate) fn create_render_pipeline(
     color_format: wgpu::TextureFormat,
     depth_format: Option<wgpu::TextureFormat>,
     vertex_layouts: &[wgpu::VertexBufferLayout],
-    topology: wgpu::PrimitiveTopology, // NEW!
+    topology: wgpu::PrimitiveTopology,
     shader: wgpu::ShaderModuleDescriptor,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(shader);
@@ -200,7 +200,7 @@ pub(crate) fn create_render_pipeline(
             })],
         }),
         primitive: wgpu::PrimitiveState {
-            topology, // NEW!
+            topology,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: Some(wgpu::Face::Back),
@@ -791,7 +791,7 @@ impl<'a> State<'a> {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
-pub async fn run() {
+pub async fn run() -> EventLoop<()> {
     cfg_if::cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -827,8 +827,9 @@ pub async fn run() {
             .expect("Couldn't append canvas to document body.");
     }
 
-    let mut state = State::new(window.into()).await.unwrap(); // NEW!
+    let mut state = State::new(window.into()).await.unwrap();
     let mut last_render_time = instant::Instant::now();
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
         match event {
