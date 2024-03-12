@@ -1,9 +1,9 @@
 use cgmath::*;
 use std::f32::consts::FRAC_PI_2;
 use std::time::Duration;
-use tao::dpi::PhysicalPosition;
-use tao::event::{ElementState, MouseScrollDelta};
-use tao::keyboard::KeyCode;
+use winit::dpi::PhysicalPosition;
+use winit::event::{ElementState, MouseScrollDelta};
+use winit::keyboard::KeyCode;
 
 const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
@@ -61,7 +61,7 @@ impl Projection {
     }
 
     pub fn calc_matrix(&self) -> Matrix4<f32> {
-        // UDPATE
+        // UPDATE
         perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
 }

@@ -4,16 +4,18 @@ use cgmath::prelude::*;
 use cgmath::{Matrix, SquareMatrix};
 use std::iter;
 use std::sync::Arc;
-use tao::event::{DeviceEvent, ElementState, Event, KeyEvent, MouseButton, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoop};
-use tao::keyboard::KeyCode;
-use tao::window::Window;
+use egui_wgpu::ScreenDescriptor;
+use winit::event::{DeviceEvent, ElementState, Event, KeyEvent, MouseButton, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
+use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::{Window, WindowBuilder};
 use wgpu::util::DeviceExt;
-use wgpu::Backends;
+use wgpu::{Backends, CommandEncoder, TextureView};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(feature = "debug")]
 use crate::debug;
+use crate::open_editor::EguiRenderer;
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
 
@@ -138,9 +140,9 @@ struct LightUniform {
     _padding2: u32,
 }
 
-struct State<'a> {
+struct State<> {
     window: Arc<Window>,
-    surface: wgpu::Surface<'a>,
+    surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -156,7 +158,7 @@ struct State<'a> {
     #[allow(dead_code)]
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
-    size: tao::dpi::PhysicalSize<u32>,
+    size: winit::dpi::PhysicalSize<u32>,
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
@@ -167,8 +169,10 @@ struct State<'a> {
     hdr: hdr::HdrPipeline,
     environment_bind_group: wgpu::BindGroup,
     sky_pipeline: wgpu::RenderPipeline,
+    egui_renderer: EguiRenderer,
     #[cfg(feature = "debug")]
     debug: crate::debug::Debug,
+
 }
 
 pub(crate) fn create_render_pipeline(
@@ -229,8 +233,8 @@ pub(crate) fn create_render_pipeline(
     })
 }
 
-impl<'a> State<'a> {
-    async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+impl State {
+    async fn new(window: Arc<Window>) -> Self {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -251,11 +255,10 @@ impl<'a> State<'a> {
             ..Default::default()
         });
 
-        // # Safety
-        //
-        // The surface needs to live as long as the window that created it.
-        // State owns the window so this should be safe.
-        let surface = unsafe { instance.create_surface(window.clone()) }.unwrap();
+        //let window = window;
+
+        let surface = unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).expect("Missed usage surface creation")) }.expect("Surface unsupported by adapter");
+        //let surface = instance.create_surface(window.clone()).unwrap();
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -458,14 +461,14 @@ impl<'a> State<'a> {
         let hdr = hdr::HdrPipeline::new(&device, &config);
 
         let hdr_loader = resources::HdrLoader::new(&device);
-        let sky_bytes = resources::load_binary("pure-sky.hdr").await?;
+        let sky_bytes = resources::load_binary("pure-sky.hdr").await;
         let sky_texture = hdr_loader.from_equirectangular_bytes(
             &device,
             &queue,
-            &sky_bytes,
+            &sky_bytes.unwrap(),
             1080,
             Some("Sky Texture"),
-        )?;
+        ).unwrap();
 
         let environment_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -592,11 +595,19 @@ impl<'a> State<'a> {
             )
         };
 
+        let mut egui_renderer = EguiRenderer::new(
+            &device,       // wgpu Device
+            config.format, // TextureFormat
+            None,                 // this can be None
+            1,                    // samples
+            &window,       // winit Window
+        );
+
         #[cfg(feature = "debug")]
         let debug = crate::debug::Debug::new(&device, &camera_bind_group_layout, surface_format);
 
-        Ok(Self {
-            window: window.into(),
+        Self {
+            window,
             surface,
             device,
             queue,
@@ -623,17 +634,18 @@ impl<'a> State<'a> {
             hdr,
             environment_bind_group,
             sky_pipeline,
+            egui_renderer,
 
             #[cfg(feature = "debug")]
             debug,
-        })
+        }
     }
 
     pub fn window(&self) -> &Window {
         &self.window
     }
 
-    fn resize(&mut self, new_size: tao::dpi::PhysicalSize<u32>) {
+    fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.projection.resize(new_size.width, new_size.height);
             self.hdr
@@ -652,7 +664,7 @@ impl<'a> State<'a> {
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        physical_key: key,
+                        physical_key: PhysicalKey::Code(key),
                         state,
                         ..
                     },
@@ -791,7 +803,7 @@ impl<'a> State<'a> {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
-pub async fn run() -> EventLoop<()> {
+pub async fn run() {
     cfg_if::cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -801,12 +813,13 @@ pub async fn run() -> EventLoop<()> {
         }
     }
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().expect("err");
     let title = env!("CARGO_PKG_NAME");
-    let window = tao::window::WindowBuilder::new()
-        .with_title(title)
-        .build(&event_loop)
-        .unwrap();
+    let window = Arc::new(WindowBuilder::new().with_title(title).build(&event_loop).unwrap());
+    let screen_descriptor = ScreenDescriptor {
+        size_in_pixels: [800, 600],
+        pixels_per_point: window.scale_factor() as f32,
+    };
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -827,61 +840,81 @@ pub async fn run() -> EventLoop<()> {
             .expect("Couldn't append canvas to document body.");
     }
 
-    let mut state = State::new(window.into()).await.unwrap();
+    let mut state = State::new(window.clone()).await;
     let mut last_render_time = instant::Instant::now();
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
+    let _result = event_loop.run(move |event, looped| {
+        //*control_flow = ControlFlow::Poll;
+        looped.set_control_flow(ControlFlow::Poll);
         match event {
-            Event::MainEventsCleared => state.window().request_redraw(),
+            Event::AboutToWait => state.window().request_redraw(),
             Event::DeviceEvent {
-                event: DeviceEvent::MouseMotion{ delta, ..},
+                event: DeviceEvent::MouseMotion { delta, .. },
                 .. // We're not using device_id currently
             } => if state.mouse_pressed {
                 state.camera_controller.process_mouse(delta.0, delta.1)
             }
-            Event::WindowEvent {
-                ref event,
-                window_id,
-                ..
-            } if window_id == state.window().id() && !state.input(event) => {
+            Event::WindowEvent { window_id, ref event }
+            if window_id == state.window.id() && !state.input(event) => {
                 match event {
-                    #[cfg(not(target_arch="wasm32"))]
+                    #[cfg(not(target_arch = "wasm32"))]
                     WindowEvent::CloseRequested
                     | WindowEvent::KeyboardInput {
                         event:
                         KeyEvent {
                             state: ElementState::Pressed,
-                            physical_key: KeyCode::Escape,
+                            physical_key: PhysicalKey::Code(KeyCode::Escape),
                             ..
                         },
                         ..
-                    } => *control_flow = ControlFlow::Exit,
+                    } => looped.exit(),
                     WindowEvent::Resized(physical_size) => {
                         state.resize(*physical_size);
                     }
-                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                        state.resize(**new_inner_size);
+                    WindowEvent::ScaleFactorChanged { .. } => {
+                        state.resize(window.inner_size());
+                    }
+                    WindowEvent::RedrawRequested => {
+                        let now = instant::Instant::now();
+                        let dt = now - last_render_time;
+                        last_render_time = now;
+                        state.update(dt);
+                        match state.render() {
+                            Ok(_) => {}
+                            // Reconfigure the surface if it's lost or outdated
+                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => state.resize(state.size),
+                            // The system is out of memory, we should probably quit
+                            Err(wgpu::SurfaceError::OutOfMemory) => looped.exit(),
+                            // We're ignoring timeouts
+                            Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
+                        }
+                        // state.egui_renderer.draw(
+                        //     &state.device,
+                        //     &state.queue,
+                        //     &mut state.encoder,
+                        //     &state.window,
+                        //     &state.view,
+                        //     screen_descriptor,
+                        //     |ui| {
+                        //         egui::Window::new("Settings")
+                        //             .resizable(true)
+                        //             .vscroll(true)
+                        //             .default_open(false)
+                        //             .show(&ui, |mut ui| {
+                        //                 ui.label("Window!");
+                        //                 ui.label("Window!");
+                        //                 ui.label("Window!");
+                        //                 ui.label("Window!");
+                        //
+                        //                 //proto_scene.egui(ui);
+                        //             });
+                        //     },
+                        // );
                     }
                     _ => {}
                 }
             }
-            Event::RedrawRequested(window_id) if window_id == state.window().id() => {
-                let now = instant::Instant::now();
-                let dt = now - last_render_time;
-                last_render_time = now;
-                state.update(dt);
-                match state.render() {
-                    Ok(_) => {}
-                    // Reconfigure the surface if it's lost or outdated
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => state.resize(state.size),
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    // We're ignoring timeouts
-                    Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
-                }
-            }
             _ => {}
         }
-    });
+    }).expect("TODO: panic message");
 }
