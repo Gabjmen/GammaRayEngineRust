@@ -25,6 +25,7 @@ wgpu = { version = "0.19.3"}
 winit = { version = "0.29.14", features = ["rwh_05"]}
 instant = "0.1"
 egui = "0.26.2"
+eframe = "0.26.2"
 egui-wgpu = "0.26.2"
 egui-winit = "0.26.2"
 

@@ -1,5 +1,5 @@
 use crate::model::{DrawLight, DrawModel, Vertex};
-use crate::{camera, hdr, model, resources, texture};
+use crate::{camera, hdr, model, resources, texture, gui, designer};
 use cgmath::prelude::*;
 use cgmath::{Matrix, SquareMatrix};
 use std::iter;
@@ -10,12 +10,13 @@ use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindo
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowBuilder};
 use wgpu::util::DeviceExt;
-use wgpu::{Backends, CommandEncoder, TextureView};
+use wgpu::{Backends, CommandEncoder, RenderPass, TextureView};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(feature = "debug")]
 use crate::debug;
-use crate::open_editor::EguiRenderer;
+use crate::designer::gui;
+use crate::gui::EguiRenderer;
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
 
@@ -140,7 +141,7 @@ struct LightUniform {
     _padding2: u32,
 }
 
-struct State<> {
+pub struct State {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -169,7 +170,7 @@ struct State<> {
     hdr: hdr::HdrPipeline,
     environment_bind_group: wgpu::BindGroup,
     sky_pipeline: wgpu::RenderPipeline,
-    egui_renderer: EguiRenderer,
+    egui: gui::EguiRenderer,
     #[cfg(feature = "debug")]
     debug: crate::debug::Debug,
 
@@ -257,8 +258,8 @@ impl State {
 
         //let window = window;
 
-        let surface = unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).expect("Missed usage surface creation")) }.expect("Surface unsupported by adapter");
-        //let surface = instance.create_surface(window.clone()).unwrap();
+        //let surface = unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).expect("Missed usage surface creation")) }.expect("Surface unsupported by adapter");
+        let surface = instance.create_surface(window.clone()).unwrap();
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -595,11 +596,11 @@ impl State {
             )
         };
 
-        let mut egui_renderer = EguiRenderer::new(
+        let mut egui = EguiRenderer::new(
             &device,       // wgpu Device
             config.format, // TextureFormat
-            None,                 // this can be None
-            1,                    // samples
+            None,          // this can be None
+            1, // samples
             &window,       // winit Window
         );
 
@@ -634,8 +635,7 @@ impl State {
             hdr,
             environment_bind_group,
             sky_pipeline,
-            egui_renderer,
-
+            egui,
             #[cfg(feature = "debug")]
             debug,
         }
@@ -725,7 +725,7 @@ impl State {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: self.hdr.view(), // UPDATED!
+                    view: self.hdr.view(),
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -772,10 +772,6 @@ impl State {
             render_pass.draw(0..3, 0..1);
         }
 
-        // NEW!
-        // Apply tonemapping
-        self.hdr.process(&mut encoder, &view);
-
         #[cfg(feature = "debug")]
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -794,6 +790,24 @@ impl State {
             });
             self.debug.draw_axis(&mut pass, &self.camera_bind_group);
         }
+
+        // Apply tonemapping
+        self.hdr.process(&mut encoder, &view);
+
+        let screen_descriptor = ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: self.window().scale_factor() as f32,
+        };
+
+        self.egui.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &self.window,
+            &view,
+            screen_descriptor,
+            |ui| gui(ui),
+        );
 
         self.queue.submit(iter::once(encoder.finish()));
         output.present();
@@ -844,7 +858,6 @@ pub async fn run() {
     let mut last_render_time = instant::Instant::now();
 
     let _result = event_loop.run(move |event, looped| {
-        //*control_flow = ControlFlow::Poll;
         looped.set_control_flow(ControlFlow::Poll);
         match event {
             Event::AboutToWait => state.window().request_redraw(),
@@ -855,63 +868,45 @@ pub async fn run() {
                 state.camera_controller.process_mouse(delta.0, delta.1)
             }
             Event::WindowEvent { window_id, ref event }
-            if window_id == state.window.id() && !state.input(event) => {
-                match event {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    WindowEvent::CloseRequested
-                    | WindowEvent::KeyboardInput {
-                        event:
-                        KeyEvent {
-                            state: ElementState::Pressed,
-                            physical_key: PhysicalKey::Code(KeyCode::Escape),
+            if window_id == state.window.id() => {
+                if !state.input(event) {
+                    match event {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        WindowEvent::CloseRequested
+                        | WindowEvent::KeyboardInput {
+                            event:
+                            KeyEvent {
+                                state: ElementState::Pressed,
+                                physical_key: PhysicalKey::Code(KeyCode::Escape),
+                                ..
+                            },
                             ..
-                        },
-                        ..
-                    } => looped.exit(),
-                    WindowEvent::Resized(physical_size) => {
-                        state.resize(*physical_size);
-                    }
-                    WindowEvent::ScaleFactorChanged { .. } => {
-                        state.resize(window.inner_size());
-                    }
-                    WindowEvent::RedrawRequested => {
-                        let now = instant::Instant::now();
-                        let dt = now - last_render_time;
-                        last_render_time = now;
-                        state.update(dt);
-                        match state.render() {
-                            Ok(_) => {}
-                            // Reconfigure the surface if it's lost or outdated
-                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => state.resize(state.size),
-                            // The system is out of memory, we should probably quit
-                            Err(wgpu::SurfaceError::OutOfMemory) => looped.exit(),
-                            // We're ignoring timeouts
-                            Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
+                        } => looped.exit(),
+                        WindowEvent::Resized(physical_size) => {
+                            state.resize(*physical_size);
                         }
-                        // state.egui_renderer.draw(
-                        //     &state.device,
-                        //     &state.queue,
-                        //     &mut state.encoder,
-                        //     &state.window,
-                        //     &state.view,
-                        //     screen_descriptor,
-                        //     |ui| {
-                        //         egui::Window::new("Settings")
-                        //             .resizable(true)
-                        //             .vscroll(true)
-                        //             .default_open(false)
-                        //             .show(&ui, |mut ui| {
-                        //                 ui.label("Window!");
-                        //                 ui.label("Window!");
-                        //                 ui.label("Window!");
-                        //                 ui.label("Window!");
-                        //
-                        //                 //proto_scene.egui(ui);
-                        //             });
-                        //     },
-                        // );
+                        WindowEvent::ScaleFactorChanged { .. } => {
+                            state.resize(window.inner_size());
+                        }
+                        WindowEvent::RedrawRequested => {
+                            let now = instant::Instant::now();
+                            let dt = now - last_render_time;
+                            last_render_time = now;
+                            state.update(dt);
+
+                            match state.render() {
+                                Ok(_) => {}
+                                // Reconfigure the surface if it's lost or outdated
+                                Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => state.resize(state.size),
+                                // The system is out of memory, we should probably quit
+                                Err(wgpu::SurfaceError::OutOfMemory) => looped.exit(),
+                                // We're ignoring timeouts
+                                Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
+                    state.egui.handle_input(&mut state.window, &event);
                 }
             }
             _ => {}

@@ -1,8 +1,10 @@
-use std::sync::Arc;
-use egui::Context;
-use egui_wgpu::{Renderer, ScreenDescriptor};
+use egui::epaint::Shadow;
+use egui::{Context, Visuals};
+use egui_wgpu::ScreenDescriptor;
+use egui_wgpu::Renderer;
+
 use egui_winit::State;
-use wgpu::{CommandEncoder, Device, Queue, StoreOp, TextureFormat, TextureView};
+use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 use winit::event::WindowEvent;
 use winit::window::Window;
 
@@ -21,8 +23,22 @@ impl EguiRenderer {
         window: &Window,
     ) -> EguiRenderer {
         let egui_context = Context::default();
-        let egui_state = State::new(egui_context.clone(), Default::default(), &window, None, None);
-        //egui_state.set_pixels_per_point(window.scale_factor() as f32);
+        let id = egui_context.viewport_id();
+
+        const BORDER_RADIUS: f32 = 2.0;
+
+        let visuals = Visuals {
+            window_rounding: egui::Rounding::same(BORDER_RADIUS),
+            window_shadow: Shadow::NONE,
+            // menu_rounding: todo!(),
+            ..Default::default()
+        };
+
+        egui_context.set_visuals(visuals);
+
+        let egui_state = egui_winit::State::new(egui_context.clone(), id, &window, None, None);
+
+        // egui_state.set_pixels_per_point(window.scale_factor() as f32);
         let egui_renderer = Renderer::new(
             device,
             output_color_format,
@@ -38,7 +54,7 @@ impl EguiRenderer {
     }
 
     pub fn handle_input(&mut self, window: &Window, event: &WindowEvent) {
-        let _ = self.state.on_window_event(&window, &event);
+        let _ = self.state.on_window_event(window, event);
     }
 
     pub fn draw(
@@ -48,7 +64,7 @@ impl EguiRenderer {
         encoder: &mut CommandEncoder,
         window: &Window,
         window_surface_view: &TextureView,
-        screen_descriptor: &ScreenDescriptor,
+        screen_descriptor: ScreenDescriptor,
         run_ui: impl FnOnce(&Context),
     ) {
         // self.state.set_pixels_per_point(window.scale_factor() as f32);
@@ -60,7 +76,9 @@ impl EguiRenderer {
         self.state
             .handle_platform_output(&window, full_output.platform_output);
 
-        let tris = self.context.tessellate(full_output.shapes, 16.0);
+        let tris = self
+            .context
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
         for (id, image_delta) in &full_output.textures_delta.set {
             self.renderer
                 .update_texture(&device, &queue, *id, &image_delta);
@@ -73,12 +91,12 @@ impl EguiRenderer {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
-                    store: StoreOp::Store,
+                    store: wgpu::StoreOp::Store,
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
             label: Some("egui main render pass"),
+            timestamp_writes: None,
             occlusion_query_set: None,
         });
         self.renderer.render(&mut rpass, &tris, &screen_descriptor);
