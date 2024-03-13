@@ -2,11 +2,12 @@ use egui::epaint::Shadow;
 use egui::{Context, Visuals};
 use egui_wgpu::ScreenDescriptor;
 use egui_wgpu::Renderer;
-
 use egui_winit::State;
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 use winit::event::WindowEvent;
 use winit::window::Window;
+
+use crate::designer;
 
 pub struct EguiRenderer {
     pub context: Context,
@@ -36,7 +37,8 @@ impl EguiRenderer {
 
         egui_context.set_visuals(visuals);
 
-        let egui_state = egui_winit::State::new(egui_context.clone(), id, &window, None, None);
+        let egui_state = State::new(egui_context.clone(), id, &window, None, None);
+        //let egui_state = renderer::State::new(window.clone());
 
         // egui_state.set_pixels_per_point(window.scale_factor() as f32);
         let egui_renderer = Renderer::new(
@@ -69,12 +71,11 @@ impl EguiRenderer {
     ) {
         // self.state.set_pixels_per_point(window.scale_factor() as f32);
         let raw_input = self.state.take_egui_input(&window);
-        let full_output = self.context.run(raw_input, |ui| {
+        let full_output = self.context.run(raw_input, |_ui| {
             run_ui(&self.context);
         });
 
-        self.state
-            .handle_platform_output(&window, full_output.platform_output);
+        self.state.handle_platform_output(&window, full_output.platform_output);
 
         let tris = self
             .context
@@ -83,8 +84,8 @@ impl EguiRenderer {
             self.renderer
                 .update_texture(&device, &queue, *id, &image_delta);
         }
-        self.renderer
-            .update_buffers(&device, &queue, encoder, &tris, &screen_descriptor);
+        self.renderer.update_buffers(&device, &queue, encoder, &tris, &screen_descriptor);
+
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &window_surface_view,

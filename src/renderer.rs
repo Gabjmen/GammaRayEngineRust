@@ -235,7 +235,7 @@ pub(crate) fn create_render_pipeline(
 }
 
 impl State {
-    async fn new(window: Arc<Window>) -> Self {
+    pub async fn new(window: Arc<Window>) -> Self {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -269,6 +269,7 @@ impl State {
             })
             .await
             .unwrap();
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -660,29 +661,34 @@ impl State {
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-        match event {
-            WindowEvent::KeyboardInput {
-                event:
+        if unsafe { !designer::IS_THE_UI_HOVERED }{
+            match event {
+                WindowEvent::KeyboardInput {
+                    event:
                     KeyEvent {
                         physical_key: PhysicalKey::Code(key),
                         state,
                         ..
                     },
-                ..
-            } => self.camera_controller.process_keyboard(*key, *state),
-            WindowEvent::MouseWheel { delta, .. } => {
-                self.camera_controller.process_scroll(delta);
-                true
+                    ..
+                } => self.camera_controller.process_keyboard(*key, *state),
+                WindowEvent::MouseWheel { delta, .. } => {
+                    self.camera_controller.process_scroll(delta);
+                    true
+                }
+                WindowEvent::MouseInput {
+                    button: MouseButton::Left,
+                    state,
+                    ..
+                } => {
+                    self.mouse_pressed = *state == ElementState::Pressed;
+                    true
+                }
+                _ => false,
             }
-            WindowEvent::MouseInput {
-                button: MouseButton::Left,
-                state,
-                ..
-            } => {
-                self.mouse_pressed = *state == ElementState::Pressed;
-                true
-            }
-            _ => false,
+        }
+        else {
+            false
         }
     }
 
@@ -827,13 +833,9 @@ pub async fn run() {
         }
     }
 
-    let event_loop = EventLoop::new().expect("err");
+    let event_loop = EventLoop::new().unwrap();
     let title = env!("CARGO_PKG_NAME");
     let window = Arc::new(WindowBuilder::new().with_title(title).build(&event_loop).unwrap());
-    let screen_descriptor = ScreenDescriptor {
-        size_in_pixels: [800, 600],
-        pixels_per_point: window.scale_factor() as f32,
-    };
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -857,7 +859,7 @@ pub async fn run() {
     let mut state = State::new(window.clone()).await;
     let mut last_render_time = instant::Instant::now();
 
-    let _result = event_loop.run(move |event, looped| {
+    let _ = event_loop.run(move |event, looped| {
         looped.set_control_flow(ControlFlow::Poll);
         match event {
             Event::AboutToWait => state.window().request_redraw(),
@@ -866,6 +868,7 @@ pub async fn run() {
                 .. // We're not using device_id currently
             } => if state.mouse_pressed {
                 state.camera_controller.process_mouse(delta.0, delta.1)
+
             }
             Event::WindowEvent { window_id, ref event }
             if window_id == state.window.id() => {

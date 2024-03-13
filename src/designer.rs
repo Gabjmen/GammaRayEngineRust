@@ -1,11 +1,13 @@
 use egui::{Align2, Context};
 
+pub static mut IS_THE_UI_HOVERED: bool = false;
+
 pub fn gui(ui: &Context) {
     egui::Window::new("Streamline CFD")
         //.vscroll(true)
         .default_open(true)
-        .max_width(1000.0)
-        .max_height(800.0)
+        .max_width(1920.0)
+        .max_height(1080.0)
         .default_width(800.0)
         .resizable(true)
         .anchor(Align2::LEFT_TOP, [0.0, 0.0])
@@ -15,9 +17,13 @@ pub fn gui(ui: &Context) {
             }
 
             ui.label("Slider");
-            // ui.add(egui::Slider::new(_, 0..=120).text("age"));
+
             ui.end_row();
 
-            // proto_scene.egui(ui);
+            check_if_hovered(ui.ctx().is_pointer_over_area());
         });
+}
+
+pub fn check_if_hovered(is_hovered: bool) {
+    unsafe { IS_THE_UI_HOVERED = is_hovered };
 }
