@@ -662,7 +662,10 @@ impl State {
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-        if unsafe { !designer::IS_THE_UI_HOVERED }{
+        if unsafe { designer::IS_THE_UI_HOVERED }{
+            false
+        }
+        else {
             match event {
                 WindowEvent::KeyboardInput {
                     event:
@@ -686,29 +689,6 @@ impl State {
                     true
                 }
                 _ => false,
-            }
-        }
-        else {
-            match event {
-                WindowEvent::KeyboardInput {
-                    event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(key),
-                        ..
-                    },
-                    ..
-                } => self.camera_controller.process_keyboard(*key, ElementState::Released),
-                WindowEvent::MouseWheel { .. } => {
-                    false
-                }
-                WindowEvent::MouseInput {
-                    button: MouseButton::Left,
-                    ..
-                } => {
-                    self.mouse_pressed = false;
-                    false
-                }
-                _ => false
             }
         }
     }

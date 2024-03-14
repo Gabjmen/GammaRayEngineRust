@@ -6,9 +6,8 @@ pub fn gui(ui: &Context) {
     egui::Window::new("Streamline CFD")
         //.vscroll(true)
         .default_open(true)
-        .max_width(1920.0)
-        .max_height(1080.0)
-        .default_width(800.0)
+        .default_width(200.0)
+        .default_height(ui.screen_rect().height())
         .resizable(true)
         .anchor(Align2::LEFT_TOP, [0.0, 0.0])
         .show(&ui, |ui| {
