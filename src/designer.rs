@@ -20,10 +20,6 @@ pub fn gui(ui: &Context) {
 
             ui.end_row();
 
-            check_if_hovered(ui.ctx().is_pointer_over_area());
+             unsafe { IS_THE_UI_HOVERED = ui.ctx().is_pointer_over_area() }
         });
-}
-
-pub fn check_if_hovered(is_hovered: bool) {
-    unsafe { IS_THE_UI_HOVERED = is_hovered };
 }
