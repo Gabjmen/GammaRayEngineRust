@@ -11,6 +11,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowBuilder};
 use wgpu::util::DeviceExt;
 use wgpu::{Backends, CommandEncoder, RenderPass, TextureView};
+use winit::keyboard::KeyCode::KeyS;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(feature = "debug")]
@@ -597,7 +598,7 @@ impl State {
             )
         };
 
-        let mut egui = EguiRenderer::new(
+        let egui = EguiRenderer::new(
             &device,       // wgpu Device
             config.format, // TextureFormat
             None,          // this can be None
@@ -688,7 +689,27 @@ impl State {
             }
         }
         else {
-            false
+            match event {
+                WindowEvent::KeyboardInput {
+                    event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(key),
+                        ..
+                    },
+                    ..
+                } => self.camera_controller.process_keyboard(*key, ElementState::Released),
+                WindowEvent::MouseWheel { .. } => {
+                    false
+                }
+                WindowEvent::MouseInput {
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    self.mouse_pressed = false;
+                    false
+                }
+                _ => false
+            }
         }
     }
 
@@ -868,7 +889,6 @@ pub async fn run() {
                 .. // We're not using device_id currently
             } => if state.mouse_pressed {
                 state.camera_controller.process_mouse(delta.0, delta.1)
-
             }
             Event::WindowEvent { window_id, ref event }
             if window_id == state.window.id() => {
