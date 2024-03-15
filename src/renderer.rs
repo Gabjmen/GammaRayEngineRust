@@ -662,7 +662,7 @@ impl State {
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-        if unsafe { designer::IS_THE_UI_HOVERED }{
+        if unsafe { designer::IS_THE_UI_HOVERED } {
             false
         }
         else {
@@ -681,7 +681,7 @@ impl State {
                     true
                 }
                 WindowEvent::MouseInput {
-                    button: MouseButton::Left,
+                    button: MouseButton::Right,
                     state,
                     ..
                 } => {

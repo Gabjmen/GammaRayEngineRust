@@ -6,6 +6,7 @@ pub mod renderer;
 pub mod resources;
 pub mod texture;
 pub mod gui;
+pub mod entity;
 
 fn main() {
     //showGPU();
