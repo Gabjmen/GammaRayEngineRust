@@ -1,3 +1,4 @@
+use std::any::Any;
 #[cfg(feature = "debug")]
 use crate::debug;
 use crate::designer::gui;
@@ -719,7 +720,7 @@ impl State {
         }
     }
 
-    fn update(&mut self, dt: std::time::Duration) {
+    fn update(&mut self, dt: Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
@@ -871,6 +872,7 @@ async fn handle_events(event: Event<()>, looped: &EventLoopWindowTarget<()>, win
             .. // We're not using device_id currently
         } => if state.mouse_pressed {
             state.camera_controller.process_mouse(delta.0, delta.1)
+
         }
         Event::WindowEvent { window_id, ref event }
         if window_id == state.window.id() => {
@@ -887,6 +889,17 @@ async fn handle_events(event: Event<()>, looped: &EventLoopWindowTarget<()>, win
                         },
                         ..
                     } => looped.exit(),
+                    WindowEvent::CursorMoved {
+                        position,
+                        ..
+                    } => {
+                        println!("Mouse position: {:?}", position)
+                    }
+                    WindowEvent::MouseInput {
+                        device_id, state, button
+                    } => {
+
+                    }
                     WindowEvent::Resized(physical_size) => {
                         state.resize(*physical_size);
                     }
