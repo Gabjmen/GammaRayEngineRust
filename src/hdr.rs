@@ -70,6 +70,7 @@ impl HdrPipeline {
         });
 
         let shader = wgpu::include_wgsl!("hdr.wgsl");
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&layout],

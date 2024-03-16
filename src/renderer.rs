@@ -1,23 +1,27 @@
-use crate::model::{DrawLight, DrawModel, Vertex};
-use crate::{camera, hdr, model, resources, texture, gui, designer};
-use cgmath::prelude::*;
-use cgmath::{Matrix, SquareMatrix};
-use std::iter;
-use std::sync::Arc;
-use egui_wgpu::ScreenDescriptor;
-use winit::event::{DeviceEvent, ElementState, Event, KeyEvent, MouseButton, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
-use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowBuilder};
-use wgpu::util::DeviceExt;
-use wgpu::{Backends, CommandEncoder, RenderPass, TextureView};
-use winit::keyboard::KeyCode::KeyS;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 #[cfg(feature = "debug")]
 use crate::debug;
 use crate::designer::gui;
 use crate::gui::EguiRenderer;
+use crate::model::{DrawLight, DrawModel, Vertex};
+use crate::{camera, designer, gui, hdr, model, resources, texture, utils};
+use cgmath::prelude::*;
+use cgmath::{Matrix, SquareMatrix};
+use egui_wgpu::ScreenDescriptor;
+use pollster::FutureExt;
+use std::iter;
+use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
+use instant::Instant;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+use wgpu::util::DeviceExt;
+use wgpu::{Backends, CommandEncoder, RenderPass, TextureView};
+use winit::event::{DeviceEvent, ElementState, Event, KeyEvent, MouseButton, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
+use winit::keyboard::KeyCode::KeyS;
+use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::{Window, WindowBuilder};
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
 
@@ -172,9 +176,11 @@ pub struct State {
     environment_bind_group: wgpu::BindGroup,
     sky_pipeline: wgpu::RenderPipeline,
     egui: gui::EguiRenderer,
+    texture_size: u32,
+    output_buffer: wgpu::Buffer,
+    last_frame: Option<std::time::Instant>,
     #[cfg(feature = "debug")]
     debug: crate::debug::Debug,
-
 }
 
 pub(crate) fn create_render_pipeline(
@@ -285,6 +291,24 @@ impl State {
             .await
             .unwrap();
 
+        let texture_size = 256u32;
+
+        // we need to store this for later
+        let u32_size = std::mem::size_of::<u32>() as u32;
+
+        let output_buffer_size = (u32_size * texture_size * texture_size) as wgpu::BufferAddress;
+
+        let output_buffer_desc = wgpu::BufferDescriptor {
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST
+                // this tells wpgu that we want to read this buffer from the cpu
+                | wgpu::BufferUsages::MAP_READ,
+            label: None,
+            mapped_at_creation: false,
+        };
+
+        let output_buffer = device.create_buffer(&output_buffer_desc);
+
         let surface_caps = surface.get_capabilities(&adapter);
         // Shader code in this tutorial assumes an Srgb surface texture. Using a different
         // one will result all the colors comming out darker. If you want to support non
@@ -349,9 +373,10 @@ impl State {
             });
 
         let camera = camera::Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
-        let projection =
-            camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
-        let camera_controller = camera::CameraController::new(4.0, 0.4);
+
+        let projection = camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
+
+        let camera_controller = camera::CameraController::new(0.1, 0.001);
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
@@ -465,13 +490,15 @@ impl State {
 
         let hdr_loader = resources::HdrLoader::new(&device);
         let sky_bytes = resources::load_binary("pure-sky.hdr").await;
-        let sky_texture = hdr_loader.from_equirectangular_bytes(
-            &device,
-            &queue,
-            &sky_bytes.unwrap(),
-            1080,
-            Some("Sky Texture"),
-        ).unwrap();
+        let sky_texture = hdr_loader
+            .from_equirectangular_bytes(
+                &device,
+                &queue,
+                &sky_bytes.unwrap(),
+                1080,
+                Some("Sky Texture"),
+            )
+            .unwrap();
 
         let environment_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -602,12 +629,11 @@ impl State {
             &device,       // wgpu Device
             config.format, // TextureFormat
             None,          // this can be None
-            1, // samples
+            1,             // samples
             &window,       // winit Window
         );
 
-        #[cfg(feature = "debug")]
-        let debug = crate::debug::Debug::new(&device, &camera_bind_group_layout, surface_format);
+        let last_frame = Some(Instant::now());
 
         Self {
             window,
@@ -638,8 +664,9 @@ impl State {
             environment_bind_group,
             sky_pipeline,
             egui,
-            #[cfg(feature = "debug")]
-            debug,
+            texture_size,
+            output_buffer,
+            last_frame,
         }
     }
 
@@ -664,16 +691,15 @@ impl State {
     fn input(&mut self, event: &WindowEvent) -> bool {
         if unsafe { designer::IS_THE_UI_HOVERED } {
             false
-        }
-        else {
+        } else {
             match event {
                 WindowEvent::KeyboardInput {
                     event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(key),
-                        state,
-                        ..
-                    },
+                        KeyEvent {
+                            physical_key: PhysicalKey::Code(key),
+                            state,
+                            ..
+                        },
                     ..
                 } => self.camera_controller.process_keyboard(*key, *state),
                 WindowEvent::MouseWheel { delta, .. } => {
@@ -716,8 +742,9 @@ impl State {
         );
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    async fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
+
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -779,25 +806,6 @@ impl State {
             render_pass.draw(0..3, 0..1);
         }
 
-        #[cfg(feature = "debug")]
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Debug"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
-            self.debug.draw_axis(&mut pass, &self.camera_bind_group);
-        }
-
         // Apply tonemapping
         self.hdr.process(&mut encoder, &view);
 
@@ -817,102 +825,116 @@ impl State {
         );
 
         self.queue.submit(iter::once(encoder.finish()));
+
+        // We need to scope the mapping variables so that we can
+        // unmap the buffer
+        {
+            let buffer_slice = self.output_buffer.slice(..);
+
+            // NOTE: We have to create the mapping THEN device.poll() before await
+            // the future. Otherwise, the application will freeze.
+            let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
+
+            buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                tx.send(result).unwrap();
+            });
+
+            self.device.poll(wgpu::Maintain::Wait);
+
+            rx.receive().await.unwrap().expect("rx received nothing");
+
+            let data = buffer_slice.get_mapped_range();
+
+            // use image::{ImageBuffer, Rgba};
+            //
+            // let buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(self.texture_size, self.texture_size, data).unwrap();
+            //
+            // buffer.save("image.png").unwrap();
+        }
+        self.output_buffer.unmap();
+
+        _ = utils::calculate_fps(self.last_frame);
+
         output.present();
 
         Ok(())
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
-pub async fn run() {
-    cfg_if::cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
-            std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-            console_log::init_with_level(log::Level::Info).expect("Couldn't initialize logger");
-        } else {
-            env_logger::init();
+async fn handle_events(event: Event<()>, looped: &EventLoopWindowTarget<()>, window: Arc<Window>, state: &mut State, last_render_time: Instant) {
+
+    looped.set_control_flow(ControlFlow::Poll);
+    match event {
+        Event::AboutToWait => state.window().request_redraw(),
+        Event::DeviceEvent {
+            event: DeviceEvent::MouseMotion { delta, .. },
+            .. // We're not using device_id currently
+        } => if state.mouse_pressed {
+            state.camera_controller.process_mouse(delta.0, delta.1)
         }
+        Event::WindowEvent { window_id, ref event }
+        if window_id == state.window.id() => {
+            if !state.input(event) {
+                match event {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    WindowEvent::CloseRequested
+                    | WindowEvent::KeyboardInput {
+                        event:
+                        KeyEvent {
+                            state: ElementState::Pressed,
+                            physical_key: PhysicalKey::Code(KeyCode::Escape),
+                            ..
+                        },
+                        ..
+                    } => looped.exit(),
+                    WindowEvent::Resized(physical_size) => {
+                        state.resize(*physical_size);
+                    }
+                    WindowEvent::ScaleFactorChanged { .. } => {
+                        state.resize(window.inner_size());
+                    }
+                    WindowEvent::RedrawRequested => {
+                        let now = Instant::now();
+                        let dt = now - last_render_time; // !!! duration has a bug and its hardcoded in the update_camera method (from camera).
+                        state.update(dt);
+
+                        match state.render().await {
+                            Ok(_) => {}
+                            // Reconfigure the surface if it's lost or outdated
+                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => state.resize(state.size),
+                            // The system is out of memory, we should probably quit
+                            Err(wgpu::SurfaceError::OutOfMemory) => looped.exit(),
+                            // We're ignoring timeouts
+                            Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
+                        }
+                    }
+                    _ => {}
+                }
+                state.egui.handle_input(&mut state.window, &event);
+            }
+        }
+        _ => {}
     }
+}
+
+pub async fn run() {
+    env_logger::init();
 
     let event_loop = EventLoop::new().unwrap();
     let title = env!("CARGO_PKG_NAME");
-    let window = Arc::new(WindowBuilder::new().with_title(title).build(&event_loop).unwrap());
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Winit prevents sizing with CSS, so we have to set
-        // the size manually when on web.
-        use winit::dpi::PhysicalSize;
-        window.set_inner_size(PhysicalSize::new(450, 400));
-
-        use winit::platform::web::WindowExtWebSys;
-        web_sys::window()
-            .and_then(|win| win.document())
-            .and_then(|doc| {
-                let dst = doc.get_element_by_id("wasm-example")?;
-                let canvas = web_sys::Element::from(window.canvas());
-                dst.append_child(&canvas).ok()?;
-                Some(())
-            })
-            .expect("Couldn't append canvas to document body.");
-    }
-
+    let window = Arc::new(
+        WindowBuilder::new()
+            .with_title(title)
+            .build(&event_loop)
+            .unwrap(),
+    );
     let mut state = State::new(window.clone()).await;
-    let mut last_render_time = instant::Instant::now();
 
-    let _ = event_loop.run(move |event, looped| {
-        looped.set_control_flow(ControlFlow::Poll);
-        match event {
-            Event::AboutToWait => state.window().request_redraw(),
-            Event::DeviceEvent {
-                event: DeviceEvent::MouseMotion { delta, .. },
-                .. // We're not using device_id currently
-            } => if state.mouse_pressed {
-                state.camera_controller.process_mouse(delta.0, delta.1)
-            }
-            Event::WindowEvent { window_id, ref event }
-            if window_id == state.window.id() => {
-                if !state.input(event) {
-                    match event {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        WindowEvent::CloseRequested
-                        | WindowEvent::KeyboardInput {
-                            event:
-                            KeyEvent {
-                                state: ElementState::Pressed,
-                                physical_key: PhysicalKey::Code(KeyCode::Escape),
-                                ..
-                            },
-                            ..
-                        } => looped.exit(),
-                        WindowEvent::Resized(physical_size) => {
-                            state.resize(*physical_size);
-                        }
-                        WindowEvent::ScaleFactorChanged { .. } => {
-                            state.resize(window.inner_size());
-                        }
-                        WindowEvent::RedrawRequested => {
-                            let now = instant::Instant::now();
-                            let dt = now - last_render_time;
-                            last_render_time = now;
-                            state.update(dt);
+    let last_render_time = Instant::now();
 
-                            match state.render() {
-                                Ok(_) => {}
-                                // Reconfigure the surface if it's lost or outdated
-                                Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => state.resize(state.size),
-                                // The system is out of memory, we should probably quit
-                                Err(wgpu::SurfaceError::OutOfMemory) => looped.exit(),
-                                // We're ignoring timeouts
-                                Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
-                            }
-                        }
-                        _ => {}
-                    }
-                    state.egui.handle_input(&mut state.window, &event);
-                }
-            }
-            _ => {}
-        }
-    }).expect("TODO: panic message");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    event_loop.run(move |event, looped| {
+        rt.block_on(handle_events(event, looped, window.clone(), &mut state, last_render_time));
+    }).expect("event_loop error");
 }

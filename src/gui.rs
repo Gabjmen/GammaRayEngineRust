@@ -1,7 +1,7 @@
 use egui::epaint::Shadow;
 use egui::{Context, Visuals};
-use egui_wgpu::ScreenDescriptor;
 use egui_wgpu::Renderer;
+use egui_wgpu::ScreenDescriptor;
 use egui_winit::State;
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 use winit::event::WindowEvent;
@@ -75,7 +75,8 @@ impl EguiRenderer {
             run_ui(&self.context);
         });
 
-        self.state.handle_platform_output(&window, full_output.platform_output);
+        self.state
+            .handle_platform_output(&window, full_output.platform_output);
 
         let tris = self
             .context
@@ -84,7 +85,8 @@ impl EguiRenderer {
             self.renderer
                 .update_texture(&device, &queue, *id, &image_delta);
         }
-        self.renderer.update_buffers(&device, &queue, encoder, &tris, &screen_descriptor);
+        self.renderer
+            .update_buffers(&device, &queue, encoder, &tris, &screen_descriptor);
 
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
