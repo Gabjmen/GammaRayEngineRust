@@ -4,7 +4,7 @@ use crate::debug;
 use crate::designer::gui;
 use crate::gui::EguiRenderer;
 use crate::model::{DrawLight, DrawModel, Vertex};
-use crate::{camera, designer, gui, hdr, model, resources, texture, utils};
+use crate::{camera, designer, gui, hdr, model, resources, texture, fps_counter::FpsCounter};
 use cgmath::prelude::*;
 use cgmath::{Matrix, SquareMatrix};
 use egui_wgpu::ScreenDescriptor;
@@ -18,6 +18,7 @@ use instant::Instant;
 use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
 use wgpu::{Backends, CommandEncoder, RenderPass, TextureView};
+use winit::dpi::PhysicalPosition;
 use winit::event::{DeviceEvent, ElementState, Event, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopWindowTarget};
 use winit::keyboard::KeyCode::KeyS;
@@ -25,6 +26,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowBuilder};
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
+const FPSES_TO_KEEP: f32 = 2.0; // seconds
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -179,9 +181,8 @@ pub struct State {
     egui: gui::EguiRenderer,
     texture_size: u32,
     output_buffer: wgpu::Buffer,
-    last_frame: Option<std::time::Instant>,
-    #[cfg(feature = "debug")]
-    debug: crate::debug::Debug,
+    mouse_pos: PhysicalPosition<f64>,fps_counter: FpsCounter,
+    fpses: Vec<f32>,
 }
 
 pub(crate) fn create_render_pipeline(
@@ -634,7 +635,8 @@ impl State {
             &window,       // winit Window
         );
 
-        let last_frame = Some(Instant::now());
+        let fps_counter = FpsCounter::new();
+        let fpses = Vec::new();
 
         Self {
             window,
@@ -667,7 +669,9 @@ impl State {
             egui,
             texture_size,
             output_buffer,
-            last_frame,
+            mouse_pos: Default::default(),
+            fps_counter,
+            fpses,
         }
     }
 
@@ -720,6 +724,10 @@ impl State {
         }
     }
 
+    fn get_mouse_pos(&mut self, position: &PhysicalPosition<f64>) {
+        self.mouse_pos = *position;
+    }
+
     fn update(&mut self, dt: Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform
@@ -741,6 +749,21 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.light_uniform]),
         );
+
+        self.fps_counter.update();
+        self.fpses.push(self.fps_counter.fps() as f32);
+
+
+        let old_len = self.fpses.len();
+        let average_fps: f32 = self.fpses.iter().sum::<f32>() / old_len as f32;
+        let length = (FPSES_TO_KEEP * average_fps).round() as usize;
+
+        let mut new_fpses = Vec::with_capacity(length);
+        let start = (old_len as i32 - length as i32).max(0) as usize;
+        for i in start..old_len {
+            new_fpses.push(self.fpses[i]);
+        }
+        self.fpses = new_fpses;
     }
 
     async fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -851,10 +874,12 @@ impl State {
             // let buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(self.texture_size, self.texture_size, data).unwrap();
             //
             // buffer.save("image.png").unwrap();
+
         }
         self.output_buffer.unmap();
 
-        _ = utils::calculate_fps(self.last_frame);
+        let min_fps = self.fpses.clone().into_iter().reduce(f32::min).unwrap();
+        let fps = self.fps_counter.fps();
 
         output.present();
 
@@ -893,12 +918,7 @@ async fn handle_events(event: Event<()>, looped: &EventLoopWindowTarget<()>, win
                         position,
                         ..
                     } => {
-                        println!("Mouse position: {:?}", position)
-                    }
-                    WindowEvent::MouseInput {
-                        device_id, state, button
-                    } => {
-
+                        state.get_mouse_pos(position);
                     }
                     WindowEvent::Resized(physical_size) => {
                         state.resize(*physical_size);
@@ -945,9 +965,7 @@ pub async fn run() {
 
     let last_render_time = Instant::now();
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
     event_loop.run(move |event, looped| {
-        rt.block_on(handle_events(event, looped, window.clone(), &mut state, last_render_time));
+        pollster::block_on(handle_events(event, looped, window.clone(), &mut state, last_render_time));
     }).expect("event_loop error");
 }

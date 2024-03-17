@@ -13,8 +13,10 @@ pub mod texture;
 pub mod test;
 #[path = "./test/framework.rs"]
 pub mod framework;
-#[path = "./utils/utils.rs"]
-pub mod utils;
+#[path = "utils/fps_counter.rs"]
+pub mod fps_counter;
+#[path = "utils/take_fps.rs"]
+pub mod take_fps;
 
 fn main() {
     pollster::block_on(renderer::run());

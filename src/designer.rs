@@ -15,6 +15,7 @@ pub fn gui(ui: &Context) {
             //     println!("PRESSED")
             // }
 
+            ui.label("FPS: {}");
             ui.label("text test text test");
 
             ui.end_row();
