@@ -14,5 +14,3 @@ pub mod test;
 pub mod framework;
 #[path = "utils/fps_counter.rs"]
 pub mod fps_counter;
-#[path = "utils/take_fps.rs"]
-pub mod take_fps;

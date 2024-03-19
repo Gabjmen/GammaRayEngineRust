@@ -1,6 +1,8 @@
-use egui::{Align2, Context, WidgetText};
+use egui::{Align2, Context};
 
 pub static mut IS_THE_UI_HOVERED: bool = false;
+pub static mut FPS: f64 = 0.0;
+pub static mut MIN_FPS: f32 = 0.0;
 
 pub fn gui(ui: &Context) {
     egui::Window::new("Basic data")
@@ -15,8 +17,10 @@ pub fn gui(ui: &Context) {
             //     println!("PRESSED")
             // }
 
-            ui.label("FPS: {}");
-            ui.label("text test text test");
+            unsafe {
+                ui.label(format!("FPS: {:.0}", FPS));
+                ui.label(format!("MIN FPS: {:.0}", MIN_FPS));
+            }
 
             ui.end_row();
 

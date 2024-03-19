@@ -6,7 +6,7 @@ use crate::gui::EguiRenderer;
 use crate::model::{DrawLight, DrawModel, Vertex};
 use crate::{camera, designer, gui, hdr, model, resources, texture, fps_counter::FpsCounter};
 use cgmath::prelude::*;
-use cgmath::{Matrix, SquareMatrix};
+use cgmath::{Matrix, Matrix4, Rad, SquareMatrix, Vector3};
 use egui_wgpu::ScreenDescriptor;
 use pollster::FutureExt;
 use std::iter;
@@ -25,7 +25,7 @@ use winit::keyboard::KeyCode::KeyS;
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowBuilder};
 
-const NUM_INSTANCES_PER_ROW: u32 = 10;
+const NUM_INSTANCES_PER_ROW: u32 = 1;
 const FPSES_TO_KEEP: f32 = 2.0; // seconds
 
 #[repr(C)]
@@ -283,9 +283,7 @@ impl State {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    // UPDATED!
                     required_features: wgpu::Features::empty(),
-                    // UPDATED!
                     required_limits: wgpu::Limits::default(),
                 },
                 None, // Trace path
@@ -312,6 +310,7 @@ impl State {
         let output_buffer = device.create_buffer(&output_buffer_desc);
 
         let surface_caps = surface.get_capabilities(&adapter);
+
         // Shader code in this tutorial assumes an Srgb surface texture. Using a different
         // one will result all the colors comming out darker. If you want to support non
         // Srgb surfaces, you'll need to account for that when drawing to the frame.
@@ -321,6 +320,7 @@ impl State {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -878,8 +878,11 @@ impl State {
         }
         self.output_buffer.unmap();
 
-        let min_fps = self.fpses.clone().into_iter().reduce(f32::min).unwrap();
-        let fps = self.fps_counter.fps();
+        unsafe {
+            designer::MIN_FPS = self.fpses.clone().into_iter().reduce(f32::min).unwrap();
+            designer::FPS = self.fps_counter.fps();
+        }
+
 
         output.present();
 
