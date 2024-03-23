@@ -13,6 +13,7 @@ use std::iter;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
+use cgmath::num_traits::ToPrimitive;
 use instant::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -279,11 +280,15 @@ impl State {
             .await
             .unwrap();
 
+        let optional_features = wgpu::Features::POLYGON_MODE_LINE;
+        let required_features = wgpu::Features::empty();
+        let adapter_features = adapter.features();
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    required_features: wgpu::Features::empty(),
+                    required_features: (optional_features & adapter_features) | required_features,
                     required_limits: wgpu::Limits::default(),
                 },
                 None, // Trace path
@@ -300,9 +305,7 @@ impl State {
 
         let output_buffer_desc = wgpu::BufferDescriptor {
             size: output_buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST
-                // this tells wpgu that we want to read this buffer from the cpu
-                | wgpu::BufferUsages::MAP_READ,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             label: None,
             mapped_at_creation: false,
         };
@@ -848,41 +851,30 @@ impl State {
             |ui| gui(ui),
         );
 
+        self.queue.write_buffer(&self.output_buffer, 0, &[1, 2, 3, 4]);
         self.queue.submit(iter::once(encoder.finish()));
 
-        // We need to scope the mapping variables so that we can
-        // unmap the buffer
-        {
-            let buffer_slice = self.output_buffer.slice(..);
-
-            // NOTE: We have to create the mapping THEN device.poll() before await
-            // the future. Otherwise, the application will freeze.
-            let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
-
-            buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-                tx.send(result).unwrap();
+        self.output_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |result| {
+                // In a real program this should be a message channel of some sort.
+                // Unwrapping here will, if it fails, panic in whichever thread next
+                // calls poll(), which isn't good error handling.
+                result.unwrap();
             });
+        self.device.poll(wgpu::Maintain::Wait);
 
-            self.device.poll(wgpu::Maintain::Wait);
+        let slice = self.output_buffer.slice(..).get_mapped_range();
 
-            rx.receive().await.unwrap().expect("rx received nothing");
+        println!("{:?}", slice.get(0..4).unwrap());
 
-            let data = buffer_slice.get_mapped_range();
-
-            // use image::{ImageBuffer, Rgba};
-            //
-            // let buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(self.texture_size, self.texture_size, data).unwrap();
-            //
-            // buffer.save("image.png").unwrap();
-
-        }
+        drop(slice);
         self.output_buffer.unmap();
 
         unsafe {
             designer::MIN_FPS = self.fpses.clone().into_iter().reduce(f32::min).unwrap();
             designer::FPS = self.fps_counter.fps();
         }
-
 
         output.present();
 
